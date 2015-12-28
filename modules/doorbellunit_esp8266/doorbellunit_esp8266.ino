@@ -1,48 +1,18 @@
 /*
- *
- *
- */
-
-/*
- *  BUILD CONTROL
  *  ---------------------------------------------------------------------------
- *  Define the DEVMODE flag to include serial debug output.
- *  Define the COMM_WIFI flag to use ESP8266 WiFi module for communication or
- *  COMM_NRF24 to use NRF24L01+ modules.
+ *
+ *
+ *  ---------------------------------------------------------------------------
  */
 
 #include <avr/sleep.h>
 #include <avr/power.h>
+#include <ESP8266WiFi.h>
 
-#define COMM_NRF24
-
-#ifdef COMM_WIFI
-    #include <ESP8266WiFi.h>
-
-    const char *ssid = "<ssid>";
-    const char *password = "<network password>";
-    const char* host = "192.168.1.9";
-    const int httpPort = 3000;
-#endif
-
-#ifdef COMM_NRF24
-
-    #include <SPI.h>
-    #include <RF24_config.h>
-    #include <nRF24L01.h>
-    #include <RF24.h>
-
-    // Define pins used by NRF24L01 for chip select and chip enable
-    #define CE_PIN   9
-    #define CSN_PIN  10
-
-    // This is the address of the receiver.
-    const uint64_t pipe = 0xE8E8F0F0E1LL;
-
-    int message[2];
-
-    RF24 radio(CE_PIN, CSN_PIN);
-#endif
+const char *ssid = "<ssid>";
+const char *password = "<network password>";
+const char* host = "192.168.1.9";
+const int httpPort = 3000;
 
 const int button = 3;
 const int led = 4;
@@ -55,100 +25,58 @@ volatile int lastPressed = 0;
 bool ledOn = false;
 bool startingUp;
 
-/* ------------------- ESP8266 ----------------------------------------- */
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+void initializeComm()
+{
+    WiFi.begin(ssid, password);
 
-#ifdef COMM_WIFI
-
-    // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    void initializeComm()
+    while (WiFi.status() != WL_CONNECTED)
     {
-        WiFi.begin(ssid, password);
+        delay(100);
+    }
+}
 
-        while (WiFi.status() != WL_CONNECTED)
-        {
-            delay(100);
-        }
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+void sendNotify()
+{
+    // Use WiFiClient class to create TCP connections
+    WiFiClient client;
+
+    if (!client.connect(host, httpPort))
+    {
+        //Serial.println("connection failed");
+        return;
     }
 
-    // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    void sendNotify()
+    // We now create a URI for the request
+    String url = "/messages/event";
+
+    // This will send the request to the server
+    client.println("POST /messages/event HTTP/1.1");
+    client.println("Host: microraptor.local:300");
+    client.println("Content-Type: application/json");
+    client.println("Content-Length: " + String(39));
+    client.println("Cache-Control: no-cache\n");
+    client.print("{\"nodeId\": \"doorbell\",\"event\": \"ring!\"}");
+
+    delay(10);
+
+    // Read all the lines of the reply from server and print them to Serial
+    while ( client.available() )
     {
-        // Use WiFiClient class to create TCP connections
-        WiFiClient client;
+        // Read the response.  We're not going to do anything with it for now.
+        char ch = client.read(); //readStringUntil('\r');
 
-        if (!client.connect(host, httpPort))
-        {
-            #ifdef DEVMODE
-                Serial.println("connection failed");
-            #endif
-            return;
-        }
-
-        // We now create a URI for the request
-        String url = "/messages/event";
-
-        #ifdef DEBUG
-          Serial.print("Requesting URL: ");
-          Serial.println(url);
-        #endif
-
-        // This will send the request to the server
-        client.println("POST /messages/event HTTP/1.1");
-        client.println("Host: microraptor.local:300");
-        client.println("Content-Type: application/json");
-        client.println("Content-Length: " + String(39));
-        client.println("Cache-Control: no-cache\n");
-        client.print("{\"nodeId\": \"doorbell\",\"event\": \"ring!\"}");
-
-        delay(10);
-
-        // Read all the lines of the reply from server and print them to Serial
-        while ( client.available() )
-        {
-            // Read the response.  We're not going to do anything with it for now.
-            char ch = client.read(); //readStringUntil('\r');
-
-            #ifdef DEBUG
-                Serial.print(ch);
-            #endif
-        }
-
-        client.stop();
-        ringRequested = false;
+        //#ifdef DEBUG
+        //    Serial.print(ch);
+        //#endif
     }
 
-#endif
-
-/* ------------------- NRF24L01+ ----------------------------------------- */
-
-#ifdef COMM_NRF24
-
-    // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    // Initialize NRF24L01+ radio to enable communication.
-    // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    void initializeComm()
-    {
-        message[0] = 517;
-        message[1] = 1;
-
-        radio.begin();
-        radio.openWritingPipe( pipe );
-
-        delay(50);
-    }
-
-    // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-    void sendNotify()
-    {
-        radio.write( message, sizeof( message ) );
-
-        flashLed(4);
-    }
-
-#endif
+    client.stop();
+    ringRequested = false;
+}
 
 /* ------------------- MAIN HANDLERS & LOOP -------------------------------- */
 
@@ -186,22 +114,15 @@ void wakeUp()
 
     // When we wake up, we want to trigger the button press event
     // Remove the wakeUp interrupt handler
-    detachInterrupt(INT1);
-
-    #ifdef DEVMODE
-      Serial.println("wake!");
-    #endif
+    detachInterrupt(button);
 
     // Restore AVR peripherals used elsewhere in the code
     power_usart0_enable(); // Enable Serial
     power_timer0_enable(); // Enable millis() etc.
     power_spi_enable();    // Enable SPI
 
-    // Turn on the NRF24L01+ radio.
-    radio.powerUp();
-
     // Set up button to trigger an interrupt.
-    attachInterrupt(INT1, buttonPressed, FALLING);
+    attachInterrupt(button, buttonPressed, FALLING);
 
     // Simulate button press to set the correct flags
     buttonPressed();
@@ -216,9 +137,9 @@ void wakeUp()
 void goToSleep(void)
 {
     noInterrupts();
-    detachInterrupt(INT1);
+    detachInterrupt(button);
     delay(50);
-    attachInterrupt(INT1, wakeUp, LOW);
+    attachInterrupt(button, wakeUp, LOW);
     interrupts();
     delay(50);
 
@@ -266,12 +187,10 @@ void setup()
     initializeComm();
 
     #ifdef DEVMODE
-    #ifdef COMM_WIFI
         Serial.println("");
         Serial.println("WiFi connected");
         Serial.println("IP address: ");
         Serial.println(WiFi.localIP());
-    #endif
     #endif
 
     pinMode(button, INPUT_PULLUP);
