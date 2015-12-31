@@ -1,3 +1,20 @@
+/*
+ *  DOORBELL RECEIVER UNIT - NRF24L01+
+ *  ---------------------------------------------------------------------------
+ *  This version of the doorbell unit uses the NRF24L01+ 2.4GHz radio to receive
+ *  ring notifications from the doorbell unit.
+ *  This implementation is the first version of the doorbell, with limitted
+ *  functionality - i.e. Just a doorbell.  The initial vision was for a full
+ *  door monitoring system with a motion sensor to wake the device, camera and
+ *  audio interaction with the person at the door, a weather station capturing
+ *  temperature, humidity, and barometric pressure.
+ *
+ *  ATTRIBUTIONS
+ *
+ *  Uses the optimized RF24 library from TMRh20. https://github.com/TMRh20/RF24
+ *  ---------------------------------------------------------------------------
+ */
+
 #include <SPI.h>
 #include <RF24_config.h>
 #include <nRF24L01.h>
@@ -17,11 +34,11 @@ RF24 radio(CE_PIN, CSN_PIN); // Create a Radio
 
 void setup()
 {
-     pinMode( speakerPin, OUTPUT );
+    pinMode( speakerPin, OUTPUT );
 
     radio.begin();
     radio.openReadingPipe(1, pipe);
-    radio.startListening();;
+    radio.startListening();
 }
 
 void loop()
@@ -45,14 +62,10 @@ void loop()
 
 void ringBell()
 {
-    for (int i = 0; i < 3; i++)
-    {
-        tone(speakerPin, NOTE_A4, 400);
-        delay(400);
-        tone(speakerPin, NOTE_F4, 400);
-
-        delay(500);
-    }
+    tone(speakerPin, NOTE_A5, 800);
+    delay(800);
+    tone(speakerPin, NOTE_F5, 800);
+    delay(800);
 
     noTone(speakerPin);
     digitalWrite(speakerPin, LOW);

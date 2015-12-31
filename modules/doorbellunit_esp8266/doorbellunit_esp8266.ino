@@ -46,7 +46,10 @@ void sendNotify()
 
     if (!client.connect(host, httpPort))
     {
-        //Serial.println("connection failed");
+        #ifdef DEVMODE
+            Serial.println("connection failed");
+        #endif
+
         return;
     }
 
@@ -69,9 +72,9 @@ void sendNotify()
         // Read the response.  We're not going to do anything with it for now.
         char ch = client.read(); //readStringUntil('\r');
 
-        //#ifdef DEBUG
-        //    Serial.print(ch);
-        //#endif
+        #ifdef DEBUG
+            Serial.print(ch);
+        #endif
     }
 
     client.stop();
@@ -148,8 +151,6 @@ void goToSleep(void)
     set_sleep_mode(SLEEP_MODE_PWR_DOWN);
     sleep_enable();
 
-    radio.powerDown();
-
     power_spi_disable();    // Disable SPI
     delay(50);              // Stall for last serial output
     power_timer0_disable(); // Disable millis() etc.
@@ -172,6 +173,7 @@ void goToSleep(void)
 void setup()
 {
     startingUp = true;
+    ringRequested = false;
 
     #ifdef DEVMODE
         Serial.begin(115200);
@@ -202,10 +204,9 @@ void setup()
     // Set up button to trigger an interrupt.
     noInterrupts();
     attachInterrupt(INT1, buttonPressed, FALLING);
-    delay(100);
     interrupts();
+    delay(50);
 
-    ringRequested = false;
     startingUp = false;
 }
 
