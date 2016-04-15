@@ -38,15 +38,16 @@ int message[2];
 // Define the NRF24L01+ radio object
 RF24 radio(CE_PIN, CSN_PIN);
 
-const int button = 3;
-const int led = 4;
-const int debounceDelay = 500;
-const int activityTimeout = 30000;
+const int button            = 3;
+const int led               = 4;
+const int nrfModulePowerPin = 6;
+const int debounceDelay     = 500;
+const int activityTimeout   = 10000;
 
 volatile bool ringRequested = false;
-volatile int lastPressed = 0;
+volatile int lastPressed    = 0;
 
-bool ledOn = false;
+bool ledOn                  = false;
 bool startingUp;
 
 
@@ -55,9 +56,17 @@ bool startingUp;
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void initializeComm()
 {
+    // We're powering the radio through digital pin 6 so that we can totally
+    // turn off power to it during sleep cycle.
+    // Set the pin high to turn on power to the NRF24L01+.
+    digitalWrite( nrfModulePowerPin, HIGH );
+
+    // Set up the message that we will be sending to the base station when someone
+    // presses the doorbell button.
     message[0] = 517;       // Network ID
     message[1] = 1;         // Unit ID
 
+    // Fire up the layzar!!
     radio.begin();
     radio.openWritingPipe( pipe );
 
@@ -65,12 +74,12 @@ void initializeComm()
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+// Flashes the LED, and sends a ring message to the base station.
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void sendNotify()
 {
     radio.write( message, sizeof( message ) );
-
-    flashLed(4);
+    flashLed( 1 );
 }
 
 /* ------------------- MAIN HANDLERS & LOOP -------------------------------- */
@@ -81,19 +90,20 @@ void flashLed(int repeat)
 {
     for (byte i = 0; i < repeat; i++)
     {
-        digitalWrite(led, LOW);
-        delay(100);
-        digitalWrite(led, HIGH);
-        delay(100);
+        digitalWrite( led, LOW );
+        delay( 100 );
+        digitalWrite( led, HIGH );
+        delay( 100 );
     }
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+// Handle the button pressed event
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void buttonPressed()
 {
     // Handle button debouncing by not handling a button press within 1 second of the previous press.
-    if ( !startingUp && !ringRequested && (millis() - lastPressed > debounceDelay) )
+    if ( !startingUp && !ringRequested && ( millis() - lastPressed > debounceDelay) )
     {
         ringRequested = true;
         ledOn = true;
@@ -104,6 +114,7 @@ void buttonPressed()
 }
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+// The interrupts to wake us up has been triggered by a button press
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 void wakeUp()
 {
@@ -117,18 +128,18 @@ void wakeUp()
         Serial.println("wake!");
     #endif
 
-    // Restore AVR peripherals used elsewhere in the code
-    power_usart0_enable(); // Enable Serial
-    power_timer0_enable(); // Enable millis() etc.
-    power_spi_enable();    // Enable SPI
-
-    // Turn on the NRF24L01+ radio.
-    radio.powerUp();
+//    // Restore AVR peripherals used elsewhere in the code
+//    power_usart0_enable(); // Enable Serial
+//    power_timer0_enable(); // Enable millis() etc.
+//    power_spi_enable();    // Enable SPI
 
     // Set up button to trigger an interrupt.
-    attachInterrupt(INT1, buttonPressed, FALLING);
+    attachInterrupt( INT1, buttonPressed, FALLING );
 
     delay(50);
+
+    // Turn on the NRF24L01+ radio.
+    initializeComm();
 
     // Simulate button press to set the correct flags
     buttonPressed();
@@ -143,26 +154,27 @@ void wakeUp()
 void goToSleep(void)
 {
     noInterrupts();
-    detachInterrupt(INT1);
+    detachInterrupt( INT1 );
+    attachInterrupt( INT1, wakeUp, LOW );
     delay(50);
-    attachInterrupt(INT1, wakeUp, LOW);
     interrupts();
-    delay(50);
 
-    digitalWrite(led, LOW);
+    // Ensure that the LED is off
+    digitalWrite( led, LOW );
 
-    set_sleep_mode(SLEEP_MODE_PWR_DOWN);
-    sleep_enable();
+    // Disconnect power to the NRF24L01+ radio
+    digitalWrite( nrfModulePowerPin, LOW );
 
-    radio.powerDown();
+    // Initialize sleep mode
+    SMCR |= (1 << 2);  // Power down mode
+    SMCR |= 1;        // Enable sleep
 
-    power_spi_disable();    // Disable SPI
-    delay(50);              // Stall for last serial output
-    power_timer0_disable(); // Disable millis() etc.
-    power_usart0_disable(); // Disable Serial
+    // Disable brownout detection
+    MCUCR |= (3 << 5);
+    MCUCR = (MCUCR & ~(1 << 5)) | (1 << 6);
 
     // Go to sleep
-    sleep_mode();
+    __asm__ __volatile("sleep");
 
     /* The program will continue from here. */
     // ....
@@ -188,17 +200,33 @@ void setup()
         Serial.print("Configuring...");
     #endif
 
-    pinMode(button, INPUT_PULLUP);
-    pinMode(led, OUTPUT);
+    // Set all pins as output by default.  This reduces power.
+    for ( int pin = 1; pin <= 20; pin++ )
+    {
+        if ( pin != button )
+        {
+            pinMode( pin, OUTPUT );
+            digitalWrite( pin, LOW );
+        }
+    }
 
+
+    // Disable the Analog/Digital Converter.  Don't need it.
+    ADCSRA &= ~(1 << 7);
+
+    // Now let's set only the button pin differently.
+    pinMode( button, INPUT_PULLUP );
+
+    // Set up the NRF24L01+ radio to be ready to communicate
     initializeComm();
 
-    flashLed(3);
+    // Flash things to let the doorbell user know that something is going on
+    flashLed(2);
     ledOn = true;
 
     // Set up button to trigger an interrupt.
     noInterrupts();
-    attachInterrupt(INT1, buttonPressed, FALLING);
+    attachInterrupt( INT1, buttonPressed, FALLING );
     interrupts();
     delay(50);
 
@@ -238,8 +266,8 @@ void loop()
 
     if ( timePassed > activityTimeout )
     {
-        flashLed(4);
-        digitalWrite(led, LOW);
+        flashLed(2);
+        digitalWrite( led, LOW );
         ledOn = false;
 
         goToSleep();
@@ -248,7 +276,7 @@ void loop()
     {
         // When the button is pressed, flash the LED every half a second for 2 seconds
         // to let the user know that something is happening.
-        if ( timePassed < 2000 && (0 < (timePassed % 500) < 10) )
+        if ( timePassed < 1500 && (0 < (timePassed % 500) < 10) )
         {
             flashLed(1);
         }
